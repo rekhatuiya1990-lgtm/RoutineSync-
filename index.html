@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>RoutineSync — Formation Planner</title>
+<style>
+:root{--bg:#f5f7fb;--ink:#172033;--muted:#667085;--blue:#4868e8;--blue2:#6f83ff;--card:#fff;--line:#e5e9f2;--pink:#ff6fa8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink)}
+header{padding:20px 18px 16px;background:linear-gradient(135deg,#233b89,#6677ef);color:white}
+header h1{margin:0;font-size:24px;letter-spacing:.2px} header p{margin:5px 0 0;opacity:.88;font-size:13px}
+main{max-width:920px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;margin:0 0 14px;box-shadow:0 3px 12px rgba(26,40,80,.04)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{border:0;border-radius:12px;background:var(--blue);color:white;padding:11px 13px;font-weight:650;font-size:14px;cursor:pointer}
+button.secondary{background:#edf0ff;color:#3449b9}
+button.neutral{background:#eef1f5;color:#344054}
+button.danger{background:#fff0f4;color:#bd315e}
+button:disabled{opacity:.45}
+label{font-size:13px;font-weight:650;color:var(--muted)}
+input,select{padding:10px;border:1px solid var(--line);border-radius:10px;font-size:15px;min-width:0}
+.counter{font-weight:750;padding:0 5px}
+.stage-wrap{padding:6px}
+#stage{position:relative;width:100%;height:min(64vh,520px);min-height:330px;background:linear-gradient(white, #fafbff);border:2px solid #dbe2f4;border-radius:18px;overflow:hidden;touch-action:none;user-select:none}
+#stage:before{content:"";position:absolute;inset:8%;border:1px dashed #d6dcef;border-radius:50%}
+#stage:after{content:"";position:absolute;left:50%;top:8%;bottom:8%;width:1px;background:#e4e8f3}
+#midline{position:absolute;left:8%;right:8%;top:50%;height:1px;background:#e4e8f3}
+.dancer{position:absolute;width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--blue2));color:white;display:flex;align-items:center;justify-content:center;font-weight:800;border:3px solid white;box-shadow:0 4px 12px #394ca444;transform:translate(-50%,-50%);touch-action:none;z-index:2;cursor:grab}
+.dancer.dragging{cursor:grabbing;z-index:10;box-shadow:0 8px 20px #283c8880;scale:1.08}
+.dancer:nth-child(odd){background:linear-gradient(135deg,#ff70a9,#ff9bc3)}
+.hint{font-size:12px;color:var(--muted);margin:8px 2px 0}
+.saved-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.saved-item{display:flex;align-items:center;gap:6px;background:#f1f3ff;border-radius:12px;padding:6px 7px 6px 10px;color:#3346a8;font-size:13px}
+.saved-item button{padding:6px 8px;font-size:12px}
+.section-title{margin:0 0 10px;font-size:16px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row input{flex:1}
+#status{font-size:13px;color:#4d5dbd;min-height:18px;margin:8px 2px 0}
+footer{text-align:center;color:#8790a3;font-size:12px;padding:5px 10px 22px}
+@media(max-width:430px){main{padding:10px}.card{padding:12px}button{padding:10px 11px;font-size:13px}.dancer{width:42px;height:42px}#stage{height:58vh;min-height:300px}}
+</style>
+</head>
+<body>
+<header><h1>✨ RoutineSync</h1><p>Plan dance formations • Move dancers • Save & preview transitions</p></header>
+<main>
+<div class="card">
+  <h2 class="section-title">Dancers</h2>
+  <div class="toolbar">
+    <button id="add">＋ Add dancer</button><button id="remove" class="secondary">− Remove last</button>
+    <span class="counter" id="count">8 dancers</span>
+    <button id="reset" class="neutral">Reset layout</button>
+  </div>
+</div>
+<div class="card stage-wrap">
+  <h2 class="section-title">Formation stage</h2>
+  <div id="stage"><div id="midline"></div></div>
+  <p class="hint">Drag numbered circles anywhere on the stage. Stage is a top-view formation space.</p>
+</div>
+<div class="card">
+  <h2 class="section-title">Save formation</h2>
+  <div class="row"><input id="formationName" placeholder="Formation name (e.g. V-shape)" maxlength="35"><button id="save">Save</button></div>
+  <div id="saved" class="saved-list"></div>
+  <p class="hint">Saved formations stay on this device/browser.</p>
+</div>
+<div class="card">
+  <h2 class="section-title">Transition preview</h2>
+  <div class="row"><select id="target"><option value="">Choose saved formation</option></select><button id="preview">▶ Preview 3 sec</button><button id="stop" class="neutral">Stop</button></div>
+  <p class="hint">Preview smoothly moves the dancers to the selected saved formation in 3 seconds.</p>
+  <div id="status" aria-live="polite"></div>
+</div>
+</main>
+<footer>RoutineSync • Formation Planner</footer>
+<script>
+const stage=document.getElementById('stage'), countEl=document.getElementById('count'), savedEl=document.getElementById('saved'), targetEl=document.getElementById('target'), statusEl=document.getElementById('status');
+let dancers=[], saved=JSON.parse(localStorage.getItem('routinesync-formations')||'[]'), anim=null, startPositions=null;
+function centerPositions(n){
+  const cx=50,cy=50,rx=34,ry=32;
+  return Array.from({length:n},(_,i)=>({x:cx+rx*Math.cos((i*2*Math.PI/n)-Math.PI/2),y:cy+ry*Math.sin((i*2*Math.PI/n)-Math.PI/2)}));
+}
+function render(){
+ stage.querySelectorAll('.dancer').forEach(e=>e.remove());
+ dancers.forEach((p,i)=>{const el=document.createElement('div');el.className='dancer';el.textContent=i+1;el.dataset.i=i;pos(el,p);stage.appendChild(el);wireDrag(el);});
+ countEl.textContent=dancers.length+' dancer'+(dancers.length===1?'':'s');
+ document.getElementById('remove').disabled=dancers.length<=1;
+}
+function pos(el,p){el.style.left=p.x+'%';el.style.top=p.y+'%'}
+function wireDrag(el){
+ let active=false;
+ el.addEventListener('pointerdown',e=>{active=true;el.classList.add('dragging');el.setPointerCapture(e.pointerId);e.preventDefault()});
+ el.addEventListener('pointermove',e=>{if(!active)return;const r=stage.getBoundingClientRect();let x=(e.clientX-r.left)/r.width*100,y=(e.clientY-r.top)/r.height*100;x=Math.max(5,Math.min(95,x));y=Math.max(7,Math.min(93,y));dancers[+el.dataset.i]={x,y};pos(el,dancers[+el.dataset.i])});
+ el.addEventListener('pointerup',()=>{active=false;el.classList.remove('dragging')});
+ el.addEventListener('pointercancel',()=>{active=false;el.classList.remove('dragging')});
+}
+function stopAnimation(){if(anim){cancelAnimationFrame(anim);anim=null}stage.querySelectorAll('.dancer').forEach(el=>el.style.transition='')}
+function setCount(n){n=Math.max(1,Math.min(30,n));if(n>dancers.length){const add=centerPositions(n);while(dancers.length<n)dancers.push(add[dancers.length])}else dancers=dancers.slice(0,n);render()}
+document.getElementById('add').onclick=()=>setCount(dancers.length+1);
+document.getElementById('remove').onclick=()=>setCount(dancers.length-1);
+document.getElementById('reset').onclick=()=>{stopAnimation();dancers=centerPositions(dancers.length);render();statusEl.textContent='Layout reset.'};
+document.getElementById('save').onclick=()=>{
+ const name=document.getElementById('formationName').value.trim();if(!name){statusEl.textContent='Please enter a formation name.';return}
+ if(saved.some(f=>f.name.toLowerCase()===name.toLowerCase())){statusEl.textContent='That name already exists. Choose another.';return}
+ saved.push({name,positions:dancers.map(p=>({...p}))});localStorage.setItem('routinesync-formations',JSON.stringify(saved));document.getElementById('formationName').value='';renderSaved();statusEl.textContent='Saved: '+name;
+};
+function renderSaved(){
+ savedEl.innerHTML='';targetEl.innerHTML='<option value="">Choose saved formation</option>';
+ saved.forEach((f,i)=>{const wrap=document.createElement('div');wrap.className='saved-item';const load=document.createElement('button');load.textContent=f.name;load.className='secondary';load.onclick=()=>{stopAnimation();dancers=f.positions.map(p=>({...p}));render();statusEl.textContent='Loaded '+f.name};const del=document.createElement('button');del.textContent='×';del.className='danger';del.title='Delete formation';del.onclick=()=>{saved.splice(i,1);localStorage.setItem('routinesync-formations',JSON.stringify(saved));renderSaved();statusEl.textContent='Formation deleted.'};wrap.append(load,del);savedEl.appendChild(wrap);const opt=document.createElement('option');opt.value=i;opt.textContent=f.name;targetEl.appendChild(opt)});
+}
+document.getElementById('preview').onclick=()=>{
+ const idx=targetEl.value;if(idx===''){statusEl.textContent='Choose a saved formation first.';return}
+ stopAnimation();const target=saved[+idx].positions;if(target.length!==dancers.length){statusEl.textContent='This formation has '+target.length+' dancers. Change dancer count to match first.';return}
+ const from=dancers.map(p=>({...p})),to=target.map(p=>({...p})),els=[...stage.querySelectorAll('.dancer')];const t0=performance.now(),duration=3000;
+ statusEl.textContent='Transition preview running…';
+ function frame(now){const t=Math.min(1,(now-t0)/duration), eased=t*t*(3-2*t);dancers=from.map((p,i)=>({x:p.x+(to[i].x-p.x)*eased,y:p.y+(to[i].y-p.y)*eased}));els.forEach((el,i)=>pos(el,dancers[i]));if(t<1)anim=requestAnimationFrame(frame);else{anim=null;statusEl.textContent='Preview complete!'}}anim=requestAnimationFrame(frame);
+};
+document.getElementById('stop').onclick=()=>{stopAnimation();statusEl.textContent='Preview stopped.'};
+dancers=centerPositions(8);render();renderSaved();
+</script>
+</body></html>
